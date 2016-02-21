@@ -188,6 +188,11 @@ func New(cassetteName string) (*Recorder, error) {
 	return r, nil
 }
 
+// Setter for custom matcher
+func (r *Recorder) UseMatcher(matcher cassette.Matcher) {
+	r.cassette.SetMatcher(matcher)
+}
+
 // Stops the recorder
 func (r *Recorder) Stop() error {
 	r.server.Close()

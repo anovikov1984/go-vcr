@@ -42,7 +42,8 @@ const (
 )
 
 var (
-	InteractionNotFound = errors.New("Requested interaction not found")
+	InteractionNotFound         = errors.New("Requested interaction not found")
+	matcher             Matcher = &DefaultMatcher{}
 )
 
 // Client request type
@@ -132,13 +133,12 @@ func (c *Cassette) AddInteraction(i *Interaction) {
 
 // Gets a recorded interaction
 func (c *Cassette) GetInteraction(r *http.Request) (*Interaction, error) {
-	for _, i := range c.Interactions {
-		if r.Method == i.Request.Method && r.URL.String() == i.Request.URL {
-			return i, nil
-		}
-	}
+	return matcher.Match(c.Interactions, r)
+}
 
-	return nil, InteractionNotFound
+// Custom matcher setter
+func (c *Cassette) SetMatcher(m Matcher) {
+	matcher = m
 }
 
 // Saves the cassette on disk for future re-use
