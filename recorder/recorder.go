@@ -35,7 +35,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/dnaeon/go-vcr/cassette"
+	"github.com/anovikov1984/go-vcr/cassette"
 )
 
 // Recorder states
