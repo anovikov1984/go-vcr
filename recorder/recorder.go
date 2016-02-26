@@ -195,7 +195,7 @@ func (r *Recorder) UseMatcher(matcher cassette.Matcher) {
 
 // Stops the recorder
 func (r *Recorder) Stop() error {
-	r.server.Close()
+	r.server.CloseClientConnections()
 
 	if r.mode == ModeRecording {
 		if err := r.cassette.Save(); err != nil {
