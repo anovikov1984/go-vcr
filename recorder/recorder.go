@@ -34,6 +34,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"sync"
 
 	"github.com/anovikov1984/go-vcr/cassette"
 )
@@ -56,6 +57,14 @@ type Recorder struct {
 
 	// Transport that can be used by clients to inject
 	Transport *http.Transport
+
+	// Stop after given number of requests
+	stopAfter int
+
+	// Stop afer can be assigned only once
+	once sync.Once
+
+	stopMu sync.Mutex
 }
 
 // Proxies client requests to their original destination
@@ -149,6 +158,13 @@ func New(cassetteName string) (*Recorder, error) {
 		mode = ModeReplaying
 	}
 
+	rec := &Recorder{
+		mode:      mode,
+		cassette:  c,
+		once:      sync.Once{},
+		stopAfter: -1,
+	}
+
 	// Handler for client requests
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Pass cassette and mode to handler, so that interactions can be
@@ -156,36 +172,36 @@ func New(cassetteName string) (*Recorder, error) {
 		interaction, err := requestHandler(r, c, mode)
 
 		if err != nil {
-			panic(fmt.Errorf("Failed to process request for URL %s: %s", r.URL, err))
+			panic(fmt.Errorf("Failed to process request for URL:\n%s\n%s", r.URL, err))
 		}
 
 		w.WriteHeader(interaction.Response.Code)
 		fmt.Fprintln(w, interaction.Response.Body)
+
+		if rec.stopAfter != -1 {
+			rec.stopAfter--
+			if rec.stopAfter == 0 {
+				go rec.Stop()
+			}
+		}
 	})
 
 	// HTTP server used to mock requests
-	server := httptest.NewServer(handler)
+	rec.server = httptest.NewServer(handler)
 
 	// A proxy function which routes all requests through our HTTP server
 	// Can be used by clients to inject into their own transports
-	proxyUrl, err := url.Parse(server.URL)
+	proxyUrl, err := url.Parse(rec.server.URL)
 	if err != nil {
 		return nil, err
 	}
 
 	// A transport which can be used by clients to inject
-	transport := &http.Transport{
+	rec.Transport = &http.Transport{
 		Proxy: http.ProxyURL(proxyUrl),
 	}
 
-	r := &Recorder{
-		mode:      mode,
-		server:    server,
-		cassette:  c,
-		Transport: transport,
-	}
-
-	return r, nil
+	return rec, nil
 }
 
 // Setter for custom matcher
@@ -193,9 +209,20 @@ func (r *Recorder) UseMatcher(matcher cassette.Matcher) {
 	r.cassette.SetMatcher(matcher)
 }
 
+func (r *Recorder) StopAfter(requestsCount int) {
+	r.once.Do(func() {
+		r.stopAfter = requestsCount
+	})
+}
+
 // Stops the recorder
 func (r *Recorder) Stop() error {
+	r.stopMu.Lock()
+	r.server.Listener.Close()
+	r.server.Config.SetKeepAlivesEnabled(false)
 	r.server.CloseClientConnections()
+	r.Transport = nil
+	r.stopMu.Unlock()
 
 	if r.mode == ModeRecording {
 		if err := r.cassette.Save(); err != nil {
