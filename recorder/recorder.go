@@ -39,15 +39,17 @@ import (
 	"github.com/anovikov1984/go-vcr/cassette"
 )
 
+type RecorderMode int
+
 // Recorder states
 const (
-	ModeRecording = iota
+	ModeRecording RecorderMode = iota
 	ModeReplaying
 )
 
 type Recorder struct {
 	// Operating mode of the recorder
-	mode int
+	mode RecorderMode
 
 	// HTTP server used to mock requests
 	server *httptest.Server
@@ -68,7 +70,9 @@ type Recorder struct {
 }
 
 // Proxies client requests to their original destination
-func requestHandler(r *http.Request, c *cassette.Cassette, mode int) (*cassette.Interaction, error) {
+func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
+	*cassette.Interaction, error) {
+
 	// Return interaction from cassette if in replay mode
 	if mode == ModeReplaying {
 		return c.GetInteraction(r)
@@ -139,7 +143,7 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode int) (*cassette.
 
 // Creates a new recorder
 func New(cassetteName string) (*Recorder, error) {
-	var mode int
+	var mode RecorderMode
 	var c *cassette.Cassette
 	cassetteFile := fmt.Sprintf("%s.yaml", cassetteName)
 
@@ -207,6 +211,11 @@ func New(cassetteName string) (*Recorder, error) {
 // Setter for custom matcher
 func (r *Recorder) UseMatcher(matcher cassette.Matcher) {
 	r.cassette.SetMatcher(matcher)
+}
+
+// Recorder mode getter
+func (r *Recorder) Mode() RecorderMode {
+	return r.mode
 }
 
 func (r *Recorder) StopAfter(requestsCount int) {
