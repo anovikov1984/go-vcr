@@ -174,22 +174,27 @@ func New(cassetteName string) (*Recorder, error) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Pass cassette and mode to handler, so that interactions can be
 		// retrieved or recorded depending on the current recorder mode
+		if mode == ModeReplaying {
+			recMu.Lock()
+			if rec.stopAfter != -1 {
+				if rec.stopAfter == 0 {
+					w.WriteHeader(200)
+					fmt.Fprintln(w, "")
+					return
+				}
+				rec.stopAfter--
+			}
+			recMu.Unlock()
+		}
+
 		interaction, err := requestHandler(r, c, mode)
 
 		if err != nil {
 			panic(fmt.Errorf("Failed to process request for URL:\n%s\n%s", r.URL, err))
 		}
+
 		w.WriteHeader(interaction.Response.Code)
 		fmt.Fprintln(w, interaction.Response.Body)
-
-		recMu.Lock()
-		if rec.stopAfter != -1 {
-			rec.stopAfter--
-			if rec.stopAfter == 0 {
-				go rec.Stop()
-			}
-		}
-		recMu.Unlock()
 	})
 
 	// HTTP server used to mock requests
