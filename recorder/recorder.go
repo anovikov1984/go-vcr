@@ -145,6 +145,7 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 func New(cassetteName string) (*Recorder, error) {
 	var mode RecorderMode
 	var c *cassette.Cassette
+	var recMu sync.Mutex
 	cassetteFile := fmt.Sprintf("%s.yaml", cassetteName)
 
 	// Depending on whether the cassette file exists or not we
@@ -178,16 +179,17 @@ func New(cassetteName string) (*Recorder, error) {
 		if err != nil {
 			panic(fmt.Errorf("Failed to process request for URL:\n%s\n%s", r.URL, err))
 		}
-
 		w.WriteHeader(interaction.Response.Code)
 		fmt.Fprintln(w, interaction.Response.Body)
 
+		recMu.Lock()
 		if rec.stopAfter != -1 {
 			rec.stopAfter--
 			if rec.stopAfter == 0 {
 				go rec.Stop()
 			}
 		}
+		recMu.Unlock()
 	})
 
 	// HTTP server used to mock requests
