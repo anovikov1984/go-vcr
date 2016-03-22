@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v2"
 )
@@ -99,15 +100,25 @@ type Cassette struct {
 
 	// Interactions between client and server
 	Interactions []*Interaction `yaml:"interactions"`
+
+	// Interactions mutex
+	InteractionsMu sync.Mutex `yaml:"-"`
+
+	// Unfinished requests mutex
+	UnfinishedRequests sync.RWMutex `yaml:"-"`
+
+	// Closed by client or hanging requests
+	UnclosedRequests map[string]interface{} `yaml:"unclosed_requests"`
 }
 
 // Creates a new empty cassette
 func New(name string) *Cassette {
 	c := &Cassette{
-		Name:         name,
-		File:         fmt.Sprintf("%s.yaml", name),
-		Version:      cassetteFormatV1,
-		Interactions: make([]*Interaction, 0),
+		Name:             name,
+		File:             fmt.Sprintf("%s.yaml", name),
+		Version:          cassetteFormatV1,
+		Interactions:     make([]*Interaction, 0),
+		UnclosedRequests: make(map[string]interface{}),
 	}
 
 	return c
@@ -128,11 +139,15 @@ func Load(name string) (*Cassette, error) {
 
 // Adds a new interaction to the cassette
 func (c *Cassette) AddInteraction(i *Interaction) {
+	c.InteractionsMu.Lock()
+	defer c.InteractionsMu.Unlock()
 	c.Interactions = append(c.Interactions, i)
 }
 
 // Gets a recorded interaction
 func (c *Cassette) GetInteraction(r *http.Request) (*Interaction, error) {
+	c.InteractionsMu.Lock()
+	defer c.InteractionsMu.Unlock()
 	return matcher.Match(c.Interactions, r)
 }
 
@@ -143,6 +158,9 @@ func (c *Cassette) SetMatcher(m Matcher) {
 
 // Saves the cassette on disk for future re-use
 func (c *Cassette) Save() error {
+	c.UnfinishedRequests.RLock()
+	fmt.Printf("$$$$$$$$ UNFINISHED REQUESTS: %s\n", c.UnclosedRequests)
+	c.UnfinishedRequests.RUnlock()
 	// Save cassette file only if there were any interactions made
 	if len(c.Interactions) == 0 {
 		return nil
@@ -157,7 +175,9 @@ func (c *Cassette) Save() error {
 	}
 
 	// Marshal to YAML and save interactions
+	c.UnfinishedRequests.RLock()
 	data, err := yaml.Marshal(c)
+	c.UnfinishedRequests.RUnlock()
 	if err != nil {
 		return err
 	}
@@ -180,4 +200,28 @@ func (c *Cassette) Save() error {
 	}
 
 	return nil
+}
+
+// TODO: Rename unfinished requests
+// TODO: Fix RequestSaRted type
+// TODO: Make UR fields private
+
+func (c *Cassette) RequestStated(url string) {
+	c.UnfinishedRequests.Lock()
+	defer c.UnfinishedRequests.Unlock()
+	c.UnclosedRequests[url] = struct{}{}
+}
+
+func (c *Cassette) RequestFinished(url string) {
+	c.UnfinishedRequests.Lock()
+	defer c.UnfinishedRequests.Unlock()
+	delete(c.UnclosedRequests, url)
+}
+
+func (c *Cassette) HasRequest(url string) bool {
+	c.UnfinishedRequests.RLock()
+	_, ok := c.UnclosedRequests[url]
+	c.UnfinishedRequests.RUnlock()
+
+	return ok
 }

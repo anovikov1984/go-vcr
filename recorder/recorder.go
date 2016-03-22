@@ -29,6 +29,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -60,6 +61,7 @@ type Recorder struct {
 	// Transport that can be used by clients to inject
 	Transport *http.Transport
 
+	// TODO: remove stopafter
 	// Stop after given number of requests
 	stopAfter int
 
@@ -67,6 +69,8 @@ type Recorder struct {
 	once sync.Once
 
 	stopMu sync.Mutex
+
+	wg *sync.WaitGroup
 }
 
 // Proxies client requests to their original destination
@@ -77,6 +81,8 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 	if mode == ModeReplaying {
 		return c.GetInteraction(r)
 	}
+
+	c.RequestStated(r.URL.String())
 
 	// Copy the original request, so we can read the form values
 	reqBytes, err := httputil.DumpRequestOut(r, true)
@@ -95,6 +101,8 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 		return nil, err
 	}
 
+	// fmt.Println("\n=====================================================\n")
+	// fmt.Println("$$$$$$ RECORDING1 ", r.URL.String())
 	// Perform client request to it's original
 	// destination and record interactions
 	body := ioutil.NopCloser(r.Body)
@@ -102,6 +110,7 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 	if err != nil {
 		return nil, err
 	}
+	// fmt.Println("$$$$$$ RECORDING 2", r.URL.String())
 
 	req.Header = r.Header
 	resp, err := http.DefaultClient.Do(req)
@@ -115,10 +124,13 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 		return nil, err
 	}
 
+	// fmt.Println("$$$$$$ RECORDING 4", r.URL.String())
 	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
+	// fmt.Println("$$$$$$ RECORDING 5", r.URL.String())
+	c.RequestFinished(r.URL.String())
 
 	// Add interaction to cassette
 	interaction := &cassette.Interaction{
@@ -145,7 +157,8 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 func New(cassetteName string) (*Recorder, error) {
 	var mode RecorderMode
 	var c *cassette.Cassette
-	var recMu sync.Mutex
+	var wg sync.WaitGroup
+	// var recMu sync.Mutex
 	cassetteFile := fmt.Sprintf("%s.yaml", cassetteName)
 
 	// Depending on whether the cassette file exists or not we
@@ -161,6 +174,8 @@ func New(cassetteName string) (*Recorder, error) {
 			return nil, err
 		}
 		mode = ModeReplaying
+		fmt.Println("UR", len(c.UnclosedRequests))
+		wg.Add(len(c.UnclosedRequests))
 	}
 
 	rec := &Recorder{
@@ -168,23 +183,34 @@ func New(cassetteName string) (*Recorder, error) {
 		cassette:  c,
 		once:      sync.Once{},
 		stopAfter: -1,
+		wg:        &wg,
 	}
+
+	doneRequests := make(map[string]struct{})
 
 	// Handler for client requests
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Pass cassette and mode to handler, so that interactions can be
-		// retrieved or recorded depending on the current recorder mode
-		if mode == ModeReplaying {
-			recMu.Lock()
-			if rec.stopAfter != -1 {
-				if rec.stopAfter == 0 {
-					w.WriteHeader(200)
-					fmt.Fprintln(w, "")
-					return
-				}
-				rec.stopAfter--
+
+		fmt.Println("<<<", r.URL.String())
+		if rec.mode == ModeReplaying && c.HasRequest(r.URL.String()) {
+			_, duplicate := doneRequests[r.URL.String()]
+			if duplicate != true {
+				doneRequests[r.URL.String()] = struct{}{}
 			}
-			recMu.Unlock()
+
+			cn, ok := w.(http.CloseNotifier)
+			if !ok {
+				log.Fatal("don't support CloseNotifier")
+			}
+
+			fmt.Println("After once")
+
+			<-cn.CloseNotify()
+			if duplicate != true {
+				wg.Done()
+				fmt.Println("WG DONE")
+			}
+			return
 		}
 
 		interaction, err := requestHandler(r, c, mode)
@@ -233,6 +259,12 @@ func (r *Recorder) StopAfter(requestsCount int) {
 
 // Stops the recorder
 func (r *Recorder) Stop() error {
+	if r.mode == ModeReplaying {
+		fmt.Println("KILLING wait", r.cassette.Name)
+		r.wg.Wait()
+		fmt.Println("KILLING done", r.cassette.Name)
+	}
+
 	r.stopMu.Lock()
 	r.server.Listener.Close()
 	r.server.Config.SetKeepAlivesEnabled(false)
