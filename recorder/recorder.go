@@ -284,7 +284,6 @@ func (r *Recorder) Stop() error {
 
 	r.stopMu.Lock()
 	r.server.Listener.Close()
-	r.server.Config.SetKeepAlivesEnabled(false)
 	r.server.CloseClientConnections()
 	r.Transport = nil
 	r.stopMu.Unlock()
