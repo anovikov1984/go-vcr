@@ -264,6 +264,10 @@ func (r *Recorder) StopAfter(requestsCount int) {
 	})
 }
 
+type keepAliveServer interface {
+	SetKeepAlivesEnabled(bool)
+}
+
 // Stops the recorder
 func (r *Recorder) Stop() error {
 	if r.mode == ModeReplaying {
@@ -284,6 +288,13 @@ func (r *Recorder) Stop() error {
 
 	r.stopMu.Lock()
 	r.server.Listener.Close()
+
+	var srv interface{}
+	srv = r.server.Config
+	if s, ok := srv.(keepAliveServer); ok {
+		s.SetKeepAlivesEnabled(false)
+	}
+
 	r.server.CloseClientConnections()
 	r.Transport = nil
 	r.stopMu.Unlock()
