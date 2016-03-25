@@ -205,6 +205,7 @@ func (c *Cassette) Save() error {
 // TODO: Rename unfinished requests
 // TODO: Fix RequestSaRted type
 // TODO: Make UR fields private
+// TODO: Create customizable url2url matcher
 
 func (c *Cassette) RequestStated(url string) {
 	c.UnfinishedRequests.Lock()
@@ -224,4 +225,15 @@ func (c *Cassette) HasRequest(url string) bool {
 	c.UnfinishedRequests.RUnlock()
 
 	return ok
+}
+
+func (c *Cassette) Requests() []string {
+	var requests []string
+
+	for k, _ := range c.UnclosedRequests {
+		requests = append(requests, k)
+		fmt.Println(k)
+	}
+
+	return requests
 }

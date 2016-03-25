@@ -36,6 +36,7 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/anovikov1984/go-vcr/cassette"
 )
@@ -101,8 +102,6 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 		return nil, err
 	}
 
-	// fmt.Println("\n=====================================================\n")
-	// fmt.Println("$$$$$$ RECORDING1 ", r.URL.String())
 	// Perform client request to it's original
 	// destination and record interactions
 	body := ioutil.NopCloser(r.Body)
@@ -187,15 +186,21 @@ func New(cassetteName string) (*Recorder, error) {
 	}
 
 	doneRequests := make(map[string]struct{})
+	var doneRequestMu sync.RWMutex
 
 	// Handler for client requests
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		fmt.Println("<<<", r.URL.String())
 		if rec.mode == ModeReplaying && c.HasRequest(r.URL.String()) {
+			doneRequestMu.RLock()
 			_, duplicate := doneRequests[r.URL.String()]
+			doneRequestMu.RUnlock()
+
 			if duplicate != true {
+				doneRequestMu.Lock()
 				doneRequests[r.URL.String()] = struct{}{}
+				doneRequestMu.Unlock()
 			}
 
 			cn, ok := w.(http.CloseNotifier)
@@ -211,6 +216,8 @@ func New(cassetteName string) (*Recorder, error) {
 				fmt.Println("WG DONE")
 			}
 			return
+		} else if rec.mode == ModeReplaying {
+			fmt.Printf("$$$ NOT FOUND:\n%s\nin:\n%s\n", r.URL.String(), c.Requests())
 		}
 
 		interaction, err := requestHandler(r, c, mode)
@@ -261,7 +268,17 @@ func (r *Recorder) StopAfter(requestsCount int) {
 func (r *Recorder) Stop() error {
 	if r.mode == ModeReplaying {
 		fmt.Println("KILLING wait", r.cassette.Name)
-		r.wg.Wait()
+		waitChannel := make(chan struct{})
+		go func() {
+			r.wg.Wait()
+			waitChannel <- struct{}{}
+		}()
+
+		select {
+		case <-waitChannel:
+		case <-time.After(2 * time.Second):
+			// Extra subscribe calls dosne't invoked, and it's ok
+		}
 		fmt.Println("KILLING done", r.cassette.Name)
 	}
 
