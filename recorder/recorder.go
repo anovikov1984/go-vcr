@@ -66,9 +66,6 @@ type Recorder struct {
 	// Stop after given number of requests
 	stopAfter int
 
-	// Stop afer can be assigned only once
-	once sync.Once
-
 	stopMu sync.Mutex
 
 	wg *sync.WaitGroup
@@ -178,11 +175,9 @@ func New(cassetteName string) (*Recorder, error) {
 	}
 
 	rec := &Recorder{
-		mode:      mode,
-		cassette:  c,
-		once:      sync.Once{},
-		stopAfter: -1,
-		wg:        &wg,
+		mode:     mode,
+		cassette: c,
+		wg:       &wg,
 	}
 
 	doneRequests := make(map[string]struct{})
@@ -256,12 +251,6 @@ func (r *Recorder) UseMatcher(matcher cassette.Matcher) {
 // Recorder mode getter
 func (r *Recorder) Mode() RecorderMode {
 	return r.mode
-}
-
-func (r *Recorder) StopAfter(requestsCount int) {
-	r.once.Do(func() {
-		r.stopAfter = requestsCount
-	})
 }
 
 type keepAliveServer interface {
