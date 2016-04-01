@@ -35,6 +35,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,11 +63,8 @@ type Recorder struct {
 	// Transport that can be used by clients to inject
 	Transport *http.Transport
 
-	// TODO: remove stopafter
-	// Stop after given number of requests
-	stopAfter int
-
-	stopMu sync.Mutex
+	stopMu    sync.Mutex
+	matcherMu sync.Mutex
 
 	wg *sync.WaitGroup
 }
@@ -106,7 +104,6 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 	if err != nil {
 		return nil, err
 	}
-	// fmt.Println("$$$$$$ RECORDING 2", r.URL.String())
 
 	req.Header = r.Header
 	resp, err := http.DefaultClient.Do(req)
@@ -120,12 +117,10 @@ func requestHandler(r *http.Request, c *cassette.Cassette, mode RecorderMode) (
 		return nil, err
 	}
 
-	// fmt.Println("$$$$$$ RECORDING 4", r.URL.String())
 	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	// fmt.Println("$$$$$$ RECORDING 5", r.URL.String())
 	c.RequestFinished(r.URL.String())
 
 	// Add interaction to cassette
@@ -154,7 +149,6 @@ func New(cassetteName string) (*Recorder, error) {
 	var mode RecorderMode
 	var c *cassette.Cassette
 	var wg sync.WaitGroup
-	// var recMu sync.Mutex
 	cassetteFile := fmt.Sprintf("%s.yaml", cassetteName)
 
 	// Depending on whether the cassette file exists or not we
@@ -170,7 +164,6 @@ func New(cassetteName string) (*Recorder, error) {
 			return nil, err
 		}
 		mode = ModeReplaying
-		fmt.Println("UR", len(c.UnclosedRequests))
 		wg.Add(len(c.UnclosedRequests))
 	}
 
@@ -186,7 +179,6 @@ func New(cassetteName string) (*Recorder, error) {
 	// Handler for client requests
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-		fmt.Println("<<<", r.URL.String())
 		if rec.mode == ModeReplaying && c.HasRequest(r.URL.String()) {
 			doneRequestMu.RLock()
 			_, duplicate := doneRequests[r.URL.String()]
@@ -203,16 +195,12 @@ func New(cassetteName string) (*Recorder, error) {
 				log.Fatal("don't support CloseNotifier")
 			}
 
-			fmt.Println("After once")
-
 			<-cn.CloseNotify()
 			if duplicate != true {
 				wg.Done()
-				fmt.Println("WG DONE")
 			}
+
 			return
-		} else if rec.mode == ModeReplaying {
-			fmt.Printf("$$$ NOT FOUND:\n%s\nin:\n%s\n", r.URL.String(), c.Requests())
 		}
 
 		interaction, err := requestHandler(r, c, mode)
@@ -222,7 +210,8 @@ func New(cassetteName string) (*Recorder, error) {
 		}
 
 		w.WriteHeader(interaction.Response.Code)
-		fmt.Fprintln(w, interaction.Response.Body)
+		body := strings.TrimSuffix(interaction.Response.Body, "\n")
+		fmt.Fprintln(w, body)
 	})
 
 	// HTTP server used to mock requests
@@ -260,8 +249,8 @@ type keepAliveServer interface {
 // Stops the recorder
 func (r *Recorder) Stop() error {
 	if r.mode == ModeReplaying {
-		fmt.Println("KILLING wait", r.cassette.Name)
 		waitChannel := make(chan struct{})
+
 		go func() {
 			r.wg.Wait()
 			waitChannel <- struct{}{}
@@ -269,10 +258,9 @@ func (r *Recorder) Stop() error {
 
 		select {
 		case <-waitChannel:
-		case <-time.After(2 * time.Second):
+		case <-time.After(10 * time.Second):
 			// Extra subscribe calls dosne't invoked, and it's ok
 		}
-		fmt.Println("KILLING done", r.cassette.Name)
 	}
 
 	r.stopMu.Lock()

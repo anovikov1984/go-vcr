@@ -45,6 +45,7 @@ const (
 var (
 	InteractionNotFound         = errors.New("Requested interaction not found")
 	matcher             Matcher = &DefaultMatcher{}
+	matcherMu           sync.Mutex
 )
 
 // Client request type
@@ -148,19 +149,20 @@ func (c *Cassette) AddInteraction(i *Interaction) {
 func (c *Cassette) GetInteraction(r *http.Request) (*Interaction, error) {
 	c.InteractionsMu.Lock()
 	defer c.InteractionsMu.Unlock()
+	matcherMu.Lock()
+	defer matcherMu.Unlock()
 	return matcher.Match(c.Interactions, r)
 }
 
 // Custom matcher setter
 func (c *Cassette) SetMatcher(m Matcher) {
+	matcherMu.Lock()
+	defer matcherMu.Unlock()
 	matcher = m
 }
 
 // Saves the cassette on disk for future re-use
 func (c *Cassette) Save() error {
-	c.UnfinishedRequests.RLock()
-	fmt.Printf("$$$$$$$$ UNFINISHED REQUESTS: %s\n", c.UnclosedRequests)
-	c.UnfinishedRequests.RUnlock()
 	// Save cassette file only if there were any interactions made
 	if len(c.Interactions) == 0 {
 		return nil
@@ -221,10 +223,17 @@ func (c *Cassette) RequestFinished(url string) {
 
 func (c *Cassette) HasRequest(url string) bool {
 	c.UnfinishedRequests.RLock()
-	_, ok := c.UnclosedRequests[url]
-	c.UnfinishedRequests.RUnlock()
+	defer c.UnfinishedRequests.RUnlock()
+	matcherMu.Lock()
+	defer matcherMu.Unlock()
 
-	return ok
+	for k, _ := range c.UnclosedRequests {
+		if matcher.MatchUrlStrings(url, k) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (c *Cassette) Requests() []string {
@@ -232,7 +241,6 @@ func (c *Cassette) Requests() []string {
 
 	for k, _ := range c.UnclosedRequests {
 		requests = append(requests, k)
-		fmt.Println(k)
 	}
 
 	return requests

@@ -4,6 +4,7 @@ import "net/http"
 
 type Matcher interface {
 	Match(interactions []*Interaction, r *http.Request) (*Interaction, error)
+	MatchUrlStrings(expected, actual string) bool
 }
 
 type DefaultMatcher struct {
