@@ -258,7 +258,7 @@ func (r *Recorder) Stop() error {
 
 		select {
 		case <-waitChannel:
-		case <-time.After(10 * time.Second):
+		case <-time.After(5 * time.Second):
 			// Extra subscribe calls dosne't invoked, and it's ok
 		}
 	}
